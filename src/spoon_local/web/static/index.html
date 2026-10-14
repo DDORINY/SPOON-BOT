@@ -7,6 +7,7 @@
   <title>SPOON-BOT · 로컬 대시보드</title>
   <link rel="stylesheet" href="/static/dashboard.css">
   <script src="/static/dashboard.js" defer></script>
+  <script src="/static/donations.js" defer></script>
 </head>
 <body>
   <div class="shell">
@@ -21,14 +22,14 @@
         <div class="status-grid">
           <article class="status-card"><p>서버 상태</p><strong id="server-status">확인 중</strong><small>로컬 백엔드</small></article>
           <article class="status-card"><p>SPOON 인증</p><strong id="auth-status">미연결</strong><small>실제 SPOON 로그인 비활성</small></article>
-          <article class="status-card"><p>방송 연결</p><strong id="broadcast-status">미연결</strong><small>방송 연결 기능 미구현</small></article>
-          <article class="status-card"><p>후원 이벤트</p><strong id="events-status">대기 중</strong><small>이벤트 수신 미설정</small></article>
+          <article class="status-card"><p>방송 연결</p><strong id="broadcast-status">미연결</strong><small>실제 방송 연결 비활성</small></article>
+          <article class="status-card"><p>후원 이벤트</p><strong id="events-status">대기 중</strong><small>Mock 수집만 지원</small></article>
           <article class="status-card"><p>자동 캡처</p><strong id="capture-status">미설정</strong><small>캡처 에이전트 미구현</small></article>
         </div>
         <p id="status-message" class="status-message" role="status">서버 상태를 확인하고 있습니다.</p>
       </section>
       <div class="content-grid">
-        <section class="panel" aria-labelledby="donations-title"><div class="panel-heading"><h3 id="donations-title">최근 후원</h3><span class="tag">수신 미설정</span></div><div class="empty"><span class="empty-symbol" aria-hidden="true">♡</span><h4>데이터 없음</h4><p>후원 이벤트 연결 후 기록이 표시됩니다.</p></div></section>
+        <section class="panel" aria-labelledby="donations-title"><div class="panel-heading"><h3 id="donations-title">최근 후원</h3><span id="donation-mode" class="tag">수신 미설정</span></div><p id="donation-warning" class="muted">저장된 수신 건만 표시합니다. 누락 없는 후원 원장이 아닙니다.</p><p id="donation-total" class="coming"></p><div id="donation-list" aria-live="polite"><div class="empty"><h4>데이터 없음</h4></div></div><a class="auth-link" href="http://localhost:8000/auth/spoon/collection" rel="noreferrer">Mock 수집 시작·중지 관리</a></section>
         <section class="panel" aria-labelledby="captures-title"><div class="panel-heading"><h3 id="captures-title">최근 캡처</h3><span class="tag">에이전트 미설정</span></div><div class="empty"><span class="empty-symbol" aria-hidden="true">▧</span><h4>데이터 없음</h4><p>Windows 캡처 연결 후 이미지가 표시됩니다.</p></div></section>
       </div>
       <div class="content-grid secondary">
@@ -36,7 +37,7 @@
         <section class="panel" aria-labelledby="logs-title"><h3 id="logs-title">로그</h3><p class="coming">준비 중</p><p class="muted">로그 조회 기능은 아직 제공되지 않습니다.</p></section>
       </div>
     </main>
-    <footer>현재 제공 기능: 서버 상태 확인 · 나머지 방송 기능은 구현 예정</footer>
+    <footer>현재 제공 기능: 서버 상태 · Mock 인증·후원 수집 / 실제 방송·캡처 연결은 미구현</footer>
   </div>
 </body>
 </html>
