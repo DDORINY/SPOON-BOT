@@ -20,7 +20,7 @@
         <div class="section-heading"><h3 id="status-title">연결 상태</h3><span id="last-update">상태를 불러오는 중</span></div>
         <div class="status-grid">
           <article class="status-card"><p>서버 상태</p><strong id="server-status">확인 중</strong><small>로컬 백엔드</small></article>
-          <article class="status-card"><p>SPOON 인증</p><strong id="auth-status">미연결</strong><small>인증 기능 미구현</small></article>
+          <article class="status-card"><p>SPOON 인증</p><strong id="auth-status">미연결</strong><small>실제 SPOON 로그인 비활성</small></article>
           <article class="status-card"><p>방송 연결</p><strong id="broadcast-status">미연결</strong><small>방송 연결 기능 미구현</small></article>
           <article class="status-card"><p>후원 이벤트</p><strong id="events-status">대기 중</strong><small>이벤트 수신 미설정</small></article>
           <article class="status-card"><p>자동 캡처</p><strong id="capture-status">미설정</strong><small>캡처 에이전트 미구현</small></article>
@@ -32,7 +32,7 @@
         <section class="panel" aria-labelledby="captures-title"><div class="panel-heading"><h3 id="captures-title">최근 캡처</h3><span class="tag">에이전트 미설정</span></div><div class="empty"><span class="empty-symbol" aria-hidden="true">▧</span><h4>데이터 없음</h4><p>Windows 캡처 연결 후 이미지가 표시됩니다.</p></div></section>
       </div>
       <div class="content-grid secondary">
-        <section class="panel" aria-labelledby="settings-title"><h3 id="settings-title">설정</h3><p class="coming">준비 중</p><p class="muted">대시보드 설정 기능은 아직 제공되지 않습니다.</p></section>
+        <section class="panel" aria-labelledby="settings-title"><h3 id="settings-title">설정 및 인증 준비</h3><p class="coming">실제 인증은 준비 중</p><p class="muted">Mock 모드에서는 외부 접속 없이 인증 흐름만 시험합니다. localhost 준비 화면에서 시작·해제할 수 있습니다.</p><a class="auth-link" href="http://localhost:8000/auth/spoon/prepare" rel="noreferrer">로컬 인증 준비 확인</a></section>
         <section class="panel" aria-labelledby="logs-title"><h3 id="logs-title">로그</h3><p class="coming">준비 중</p><p class="muted">로그 조회 기능은 아직 제공되지 않습니다.</p></section>
       </div>
     </main>

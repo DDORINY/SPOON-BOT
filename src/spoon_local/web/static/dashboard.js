@@ -2,7 +2,7 @@
 
 const byId = (id) => document.getElementById(id);
 const stateLabels = {
-  spoon_auth: { not_configured: "미연결", disconnected: "미연결" },
+  spoon_auth: { not_configured: "미연결", disconnected: "미연결", mock_ready: "Mock 준비", mock_authenticated: "Mock 인증됨", reauth_required: "재인증 필요", revoke_unconfirmed: "폐기 미확인" },
   broadcast: { not_configured: "미연결", disconnected: "미연결" },
   donation_events: { not_configured: "대기 중", disconnected: "미연결" },
   capture_agent: { not_configured: "미설정", disconnected: "미연결" },
