@@ -79,7 +79,7 @@ API에는 설정 값, DB 경로, 인증정보를 포함하지 않는다. `.env`�
 
 ## K2.1 오프라인 Mock 인증
 
-기본 앱은 인증 비활성(`not_configured`)이다. SPOON_CLIENT_ID/SECRET 등 환경변수가 있어도 OAuth에 사용하지 않는다. 실제 HTTP 클라이언트는 모든 요청을 거부하는 경계만 제공하며, 네트워크 구현은 없다. PKCE는 지원 미확인 상태로 활성화하지 않았다.
+기본 앱은 인증 비활성(`not_configured`)이다. SPOON_CLIENT_ID/SECRET 등 환경변수가 있어도 OAuth에 사용하지 않는다. Mock 경로는 외부 HTTP 요청을 사용하지 않는다. 실제 HTTP 클라이언트는 아래의 명시적 Real 모드에서만 사용한다. PKCE는 지원 미확인 상태로 활성화하지 않았다.
 
 로컬 모의 인증을 실행하려면 다음 명령을 사용한다. 앱은 127.0.0.1:8000에만 바인딩한다.
 
@@ -128,3 +128,19 @@ DB 테이블은 mock_metadata, broadcast_sessions, donations, event_conflicts, c
 금액은 Decimal로 검증하고 canonical 문자열로 저장한다. number의 정수/범위는 공식 보장으로 가정하지 않으며 로컬 자릿수/크기 제한을 적용한다. 저장은 금액·시각·중복 메타데이터만 사용하고 채팅/입장/하트도 저장하지 않는다. HMAC fingerprint의 salt는 Mock DB에 함께 보관하며 암호화·기밀성 보장이 아니라 안정적인 비교용이다. 30일 자동 삭제와 캡처는 아직 구현하지 않았다.
 
 구현·검증 요약은 `docs/k3-1-mock-sse.md`에 있다. 앱 승인 완료는 사용자 확인 정보이며, 이 실행이 실제 OAuth/SSE 연결을 활성화하지 않는다.
+
+## K2.2 명시적 Real OAuth
+
+실제 인증은 별도 모드에서만 사용할 수 있다. 기존 기본/Mock 명령은 유지되며 Mock은 실제 .env를 읽지 않는다.
+
+```bash
+.venv/bin/python -m spoon_local --real-oauth
+```
+
+Real 모드는 로컬 .env의 SPOON_CLIENT_ID, SPOON_CLIENT_SECRET, SPOON_REGION, SPOON_REDIRECT_URI를 읽고 OS 환경변수를 우선한다. 누락/잘못된 설정은 시작을 거절한다. 설정 값은 출력하지 않는다. callback은 정확히 `http://localhost:8000/auth/spoon/callback`이어야 한다.
+
+서버 실행만으로 로그인·외부 요청을 하지 않는다. `http://localhost:8000/`에서 실제 SPOON 로그인 링크를 열고, localhost 준비 화면의 POST 버튼을 사용자가 직접 눌러야 공식 동의 화면으로 이동한다. 토큰 교환/갱신/폐기는 서버에서만 실행하고 메모리에만 저장한다. Real 모드는 DB를 열거나 초기화하지 않으며 실제/Mock 후원을 조회·수집하지 않는다. 실제 수집 route와 버튼도 비활성이다.
+
+로그아웃은 토큰 폐기를 시도한 후 로컬 토큰/세션을 정리한다. 폐기 실패는 미확인으로 표시한다. 단순 서버 종료는 원격 토큰을 폐기하지 않으므로 먼저 인증 관리에서 로그아웃하는 것이 좋다. PKCE/public client 조건과 이 PC의 Chrome↔WSL callback은 미확인이다.
+
+실제 자격 증명과 브라우저 로그인은 이번 작업에서 실행·검증하지 않았다. 자동 테스트는 가상 설정과 Mock HTTP Transport만 사용한다. 공식 근거·실행 전 체크리스트·수동 테스트는 [K2.2 문서](docs/k2-2-real-oauth.md)를 따른다.

@@ -24,10 +24,10 @@ class AuthSecurityMiddleware:
                 scope["oauth_query"] = {}
             hosts = [value for key, value in scope["headers"] if key.lower() == b"host"]
             cookies = [value for key, value in scope["headers"] if key.lower() == b"cookie"]
-            duplicate_cookie = len(cookies) > 1 or sum(
-                item.strip().startswith(b"spoon_mock_session=")
-                for value in cookies for item in value.split(b";")
-            ) > 1
+            duplicate_cookie = len(cookies) > 1 or any(
+                sum(item.strip().startswith(name+b'=') for value in cookies for item in value.split(b';')) > 1
+                for name in (b'spoon_mock_session', b'spoon_real_session')
+            )
             if hosts != [b"localhost:8000"] or duplicate_cookie:
                 response = JSONResponse({"error": "invalid_auth_host"}, status_code=400, headers=SAFE_HEADERS)
                 await response(scope, receive, send)

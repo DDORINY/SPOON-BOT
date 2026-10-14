@@ -1,4 +1,4 @@
-"""Single-process mock auth state machine with injected monotonic clock."""
+"""Shared auth state machine and strictly separated mock/real services."""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -33,18 +33,14 @@ class Pending:
     deadline: float
 
 
-class AuthService:
+class _AuthCore:
+    ready_state = "mock_ready"
+    authenticated_state = "mock_authenticated"
+    mode = "mock"
     def __init__(
         self, settings: OAuthSettings, client: OAuthClient,
         clock: Callable[[], float] = time.monotonic,
     ):
-        # Real credentials/clients cannot be enabled through settings or .env.
-        if (
-            not isinstance(client, MockOAuthClient)
-            or settings.client_id != MOCK_CLIENT_ID
-            or settings.client_secret != MOCK_CLIENT_SECRET
-        ):
-            raise ValueError("Only offline mock authentication is available")
         self.settings = settings
         self.client = client
         self.clock = clock
@@ -53,7 +49,7 @@ class AuthService:
         self.pending: Pending | None = None
         self.used_codes: set[bytes] = set()
         self.lock = asyncio.Lock()
-        self.state = "mock_ready"
+        self.state = self.ready_state
 
     def prepare(self, identifier: str | None) -> BrowserSession:
         if not self.valid_session(identifier):
@@ -86,33 +82,48 @@ class AuthService:
             and same(state, self.pending.state)
         )
 
+    def _on_auth_failure(self):
+        pass
+
+    def _on_provider_failure(self, failure):
+        pass
+
     async def complete(self, identifier: str | None, state: str | None, code: str | None, error: str | None) -> bool:
         async with self.lock:
             if not self.valid_pending(identifier, state):
                 return False
             self.pending = None  # Consume before any await/provider call.
             if error:
+                self._on_auth_failure()
                 return False
             digest = hashlib.sha256((code or "").encode()).digest()
             if not code or digest in self.used_codes or len(self.used_codes) >= 4096:
+                self._on_auth_failure()
                 return False
             self.used_codes.add(digest)
             try:
                 response = await self.client.exchange(code, self.settings)
                 pair = TokenPair.from_response(response, self.clock())
                 self.store.replace(pair)
-                self.state = "mock_authenticated"
+                self.state = self.authenticated_state
                 return True
-            except Exception:
+            except asyncio.CancelledError:
+                self.store.clear()
+                self.state = "reauth_required"
+                self._on_auth_failure()
+                raise
+            except Exception as failure:
                 # Provider messages may contain secrets; never log/rethrow them.
                 self.store.clear()
                 self.state = "reauth_required"
+                self._on_auth_failure()
+                self._on_provider_failure(failure)
                 return False
 
     async def refresh_if_needed(self, force: bool = False, expected_pair=None) -> None:
         async with self.lock:
             pair = self.store.pair
-            if (not pair or self.state != "mock_authenticated"
+            if (not pair or self.state != self.authenticated_state
                 or (force and expected_pair is not None and pair is not expected_pair)
                 or (not force and self.clock() < pair.refresh_at)):
                 return
@@ -122,14 +133,20 @@ class AuthService:
                 if updated.refresh_token == pair.refresh_token:
                     raise OAuthFailure()
                 self.store.replace(updated)
-            except Exception:
+            except asyncio.CancelledError:
                 self.store.clear()
                 self.state = "reauth_required"
+                self._on_auth_failure()
+                raise
+            except Exception as failure:
+                self.store.clear()
+                self.state = "reauth_required"
+                self._on_provider_failure(failure)
 
     async def ensure_access(self, force_refresh: bool = False) -> bool:
         expected = self.store.pair
         await self.refresh_if_needed(force_refresh, expected)
-        return bool(self.state == "mock_authenticated" and self.store.pair)
+        return bool(self.state == self.authenticated_state and self.store.pair)
 
     async def authorized_for(self, scopes: set[str]) -> bool:
         return bool(await self.ensure_access() and scopes.issubset(self.store.pair.scopes))
@@ -149,7 +166,7 @@ class AuthService:
                 return False
             self.store.clear()
             self.session = None
-            self.state = "mock_ready"
+            self.state = self.ready_state
             return True
 
     def close(self) -> None:
@@ -157,6 +174,62 @@ class AuthService:
         self.session = None
         self.pending = None
         self.used_codes.clear()
-        self.client.codes.clear()
-        self.client.refresh_tokens.clear()
-        self.state = "mock_ready"
+        if isinstance(self.client, MockOAuthClient):
+            self.client.codes.clear()
+            self.client.refresh_tokens.clear()
+        self.state = self.ready_state
+
+
+class AuthService(_AuthCore):
+    """Existing offline service; rejects HTTP clients and real credentials."""
+
+    def __init__(self, settings: OAuthSettings, client: OAuthClient, clock=time.monotonic):
+        if (not isinstance(client, MockOAuthClient) or settings.client_id != MOCK_CLIENT_ID or settings.client_secret != MOCK_CLIENT_SECRET):
+            raise ValueError("Only offline mock authentication is available")
+        super().__init__(settings,client,clock)
+
+
+class RealAuthService(_AuthCore):
+    ready_state = "real_ready"
+    authenticated_state = "authenticated"
+    mode = "real"
+
+    def __init__(self, settings, client, clock=time.monotonic):
+        from spoon_local.spoon.real_oauth import RealOAuthClient, validate_real_settings
+        validate_real_settings(settings)
+        if not isinstance(client,RealOAuthClient) or client.settings != settings:
+            raise ValueError("Real OAuth requires its own HTTP client")
+        super().__init__(settings,client,clock)
+
+    def _on_auth_failure(self):
+        self.store.clear()
+        self.session=None
+        self.pending=None
+        self.state="reauth_required"
+
+    def _on_provider_failure(self, failure):
+        if getattr(failure,"category",None) in {"invalid_client","invalid_request","unsupported_grant_type"}:
+            self.state="configuration_error"
+
+    async def refresh_if_needed(self, force=False, expected_pair=None):
+        await super().refresh_if_needed(force,expected_pair)
+        if self.state in {"reauth_required","configuration_error"}:
+            self.session=None
+            self.pending=None
+
+    async def disconnect(self):
+        async with self.lock:
+            if self.state=="revoke_unconfirmed" and self.store.pair is None:
+                return False
+            confirmed=True
+            try:
+                if self.store.pair:
+                    await self.client.revoke(self.store.pair.refresh_token,self.settings)
+            except Exception:
+                confirmed=False
+            finally:
+                self.store.clear()
+                self.session=None
+                self.pending=None
+            self.state=self.ready_state if confirmed else "revoke_unconfirmed"
+            return confirmed

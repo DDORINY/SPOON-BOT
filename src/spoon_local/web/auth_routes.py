@@ -39,7 +39,7 @@ def single(values: dict, name: str):
     return found[0] if len(found) == 1 else None
 
 
-async def post_values(request: Request, auth: AuthService | None):
+async def post_values(request: Request, auth: AuthService | None, cookie_name: str = COOKIE):
     if (
         not auth or request.headers.getlist("origin") != [LOCAL_ORIGIN]
         or request.headers.get("content-type", "").split(";")[0] != "application/x-www-form-urlencoded"
@@ -55,7 +55,7 @@ async def post_values(request: Request, auth: AuthService | None):
         values = parse_qs(body.decode("utf-8"), keep_blank_values=True, max_num_fields=8)
     except (ValueError, UnicodeError):
         return None
-    sid = request.cookies.get(COOKIE)
+    sid = request.cookies.get(cookie_name)
     if not auth.valid_csrf(sid, single(values, "csrf")):
         return None
     return values

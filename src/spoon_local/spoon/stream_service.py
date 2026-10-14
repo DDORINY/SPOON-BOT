@@ -21,6 +21,8 @@ class CollectionFailure(Exception):
 
 class MockStreamService:
     def __init__(self, auth: AuthService, repository: DonationRepository, source_factory: Callable[[], MockSSESource], *, queue_size: int = 256, sleep: Callable[[float], Awaitable] = asyncio.sleep, jitter: Callable[[], float] = random.random):
+        if not isinstance(auth,AuthService):
+            raise ValueError("Mock SSE cannot use real authentication")
         if queue_size < 1:
             raise ValueError('Invalid queue capacity')
         self.auth = auth
