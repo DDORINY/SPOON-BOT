@@ -218,3 +218,53 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# SPOON Local project rules
+.venv/
+.env
+.env.*
+!.env.example
+/data/
+/captures/
+/windows_capture/captures/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+*.log
+/logs/
+*.png
+*.jpg
+*.jpeg
+*.bmp
+
+# SPOON Local: secrets, local databases and capture artifacts
+*.pem
+*.key
+*.p12
+*.pfx
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3-journal
+*.db-wal
+*.db-shm
+*.db-journal
+data/
+logs/
+captures/
+*.webp
+*.gif
+*.tif
+*.tiff
