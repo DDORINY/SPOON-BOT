@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>SPOON-BOT · 로컬 대시보드</title>
+  <link rel="stylesheet" href="/static/dashboard.css">
+  <script src="/static/dashboard.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-icon" aria-hidden="true">S</span><div><h1>SPOON-BOT</h1><p>로컬 방송 도우미</p></div></div>
+      <div class="connection" role="status" aria-live="polite"><span id="server-dot" class="dot"></span><span id="server-summary">서버 확인 중</span></div>
+    </header>
+    <main>
+      <div class="intro"><div><p class="eyebrow">방송 관리</p><h2>내 방송 대시보드</h2><p class="description">방송과 후원, 캡처 상태를 한곳에서 확인하세요.</p></div><span class="local-label">개인용 · 로컬 실행</span></div>
+      <section aria-labelledby="status-title">
+        <div class="section-heading"><h3 id="status-title">연결 상태</h3><span id="last-update">상태를 불러오는 중</span></div>
+        <div class="status-grid">
+          <article class="status-card"><p>서버 상태</p><strong id="server-status">확인 중</strong><small>로컬 백엔드</small></article>
+          <article class="status-card"><p>SPOON 인증</p><strong id="auth-status">미연결</strong><small>인증 기능 미구현</small></article>
+          <article class="status-card"><p>방송 연결</p><strong id="broadcast-status">미연결</strong><small>방송 연결 기능 미구현</small></article>
+          <article class="status-card"><p>후원 이벤트</p><strong id="events-status">대기 중</strong><small>이벤트 수신 미설정</small></article>
+          <article class="status-card"><p>자동 캡처</p><strong id="capture-status">미설정</strong><small>캡처 에이전트 미구현</small></article>
+        </div>
+        <p id="status-message" class="status-message" role="status">서버 상태를 확인하고 있습니다.</p>
+      </section>
+      <div class="content-grid">
+        <section class="panel" aria-labelledby="donations-title"><div class="panel-heading"><h3 id="donations-title">최근 후원</h3><span class="tag">수신 미설정</span></div><div class="empty"><span class="empty-symbol" aria-hidden="true">♡</span><h4>데이터 없음</h4><p>후원 이벤트 연결 후 기록이 표시됩니다.</p></div></section>
+        <section class="panel" aria-labelledby="captures-title"><div class="panel-heading"><h3 id="captures-title">최근 캡처</h3><span class="tag">에이전트 미설정</span></div><div class="empty"><span class="empty-symbol" aria-hidden="true">▧</span><h4>데이터 없음</h4><p>Windows 캡처 연결 후 이미지가 표시됩니다.</p></div></section>
+      </div>
+      <div class="content-grid secondary">
+        <section class="panel" aria-labelledby="settings-title"><h3 id="settings-title">설정</h3><p class="coming">준비 중</p><p class="muted">대시보드 설정 기능은 아직 제공되지 않습니다.</p></section>
+        <section class="panel" aria-labelledby="logs-title"><h3 id="logs-title">로그</h3><p class="coming">준비 중</p><p class="muted">로그 조회 기능은 아직 제공되지 않습니다.</p></section>
+      </div>
+    </main>
+    <footer>현재 제공 기능: 서버 상태 확인 · 나머지 방송 기능은 구현 예정</footer>
+  </div>
+</body>
+</html>
