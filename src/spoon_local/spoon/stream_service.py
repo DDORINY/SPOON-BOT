@@ -1,4 +1,4 @@
-"""Single offline collector with a bounded queue and one SQLite writer task."""
+"""Single mode-isolated collector with a bounded queue and one SQLite writer task."""
 
 import asyncio
 from collections.abc import Callable, Awaitable
@@ -8,21 +8,28 @@ import math
 import random
 import sqlite3
 
-from spoon_local.spoon.auth_service import AuthService
-from spoon_local.spoon.donation_repository import DonationRepository
+from spoon_local.spoon.auth_service import AuthService, RealAuthService
+from spoon_local.spoon.donation_repository import DonationRepository, RealDonationRepository
 from spoon_local.spoon.event_models import normalize_donation, InvalidDonation, utc_now
 from spoon_local.spoon.sse_parser import SSEParser, SSEParseError
 from spoon_local.spoon.sse_source import MockSSESource
+from spoon_local.spoon.real_sse import RealSSESource
 
 
 class CollectionFailure(Exception):
     pass
 
 
-class MockStreamService:
-    def __init__(self, auth: AuthService, repository: DonationRepository, source_factory: Callable[[], MockSSESource], *, queue_size: int = 256, sleep: Callable[[float], Awaitable] = asyncio.sleep, jitter: Callable[[], float] = random.random):
-        if not isinstance(auth,AuthService):
-            raise ValueError("Mock SSE cannot use real authentication")
+class _StreamController:
+    auth_type = AuthService
+    source_type = MockSSESource
+    mode = "mock"
+
+    def __init__(self, auth: AuthService | RealAuthService, repository: DonationRepository, source_factory: Callable[[], MockSSESource | RealSSESource], *, queue_size: int = 256, sleep: Callable[[float], Awaitable] = asyncio.sleep, jitter: Callable[[], float] = random.random):
+        if not isinstance(auth,self.auth_type):
+            raise ValueError("Collection and authentication modes must match")
+        if repository.mode != self.mode:
+            raise ValueError('Collection and storage modes must match')
         if queue_size < 1:
             raise ValueError('Invalid queue capacity')
         self.auth = auth
@@ -74,10 +81,18 @@ class MockStreamService:
                 self.state = 'STOPPED'
                 await self._gap('source_initialization_failed')
                 return False
-            if not isinstance(source, MockSSESource):
+            if not isinstance(source, self.source_type):
                 self.state = 'STOPPED'
                 await self._gap('invalid_source')
                 return False
+            if self.mode == "real":
+                try:
+                    self.repository.initialize()
+                    self.repository.gap("collection_started")
+                except (sqlite3.Error, ValueError, OSError):
+                    await source.aclose()
+                    self.state = "STORAGE_ERROR"
+                    return False
             self.queue = asyncio.Queue(maxsize=self.queue_size)
             self.state = 'CONNECTING'
             self.task = asyncio.create_task(self._run(source))
@@ -143,6 +158,8 @@ class MockStreamService:
             await asyncio.gather(producer, writer, return_exceptions=True)
             if not self.queue.empty():
                 await self._gap('uncommitted_queue')
+            if self.mode == "real":
+                await source.aclose()
             while not self.queue.empty():
                 operation, args, future = self.queue.get_nowait()
                 if future is not None and not future.done():
@@ -152,6 +169,9 @@ class MockStreamService:
     async def _pause(self, attempt: int, waiting=False):
         delay = min(30, (5 if waiting else 1) * 2 ** min(attempt, 5))
         await self.sleep(delay + min(1, max(0, self.jitter())))
+
+    async def _refresh(self, source):
+        return await self.auth.ensure_access(force_refresh=True)
 
     async def _authorized(self) -> bool:
         if not await self.auth.ensure_access():
@@ -177,9 +197,11 @@ class MockStreamService:
                 if status != 200:
                     await connection.close()
                 if status == 401:
-                    if not auth_retry and await self.auth.ensure_access(force_refresh=True):
+                    if not auth_retry and await self._refresh(source):
                         auth_retry = True
                         continue
+                    if self.mode == 'real':
+                        await self.auth.invalidate_access()
                     self.state = 'AUTH_REQUIRED'
                     await self._gap('authentication_failed')
                     return
@@ -187,7 +209,7 @@ class MockStreamService:
                     self.state = 'BLOCKED' if connection.detail_code == 'OAPI_MNGR_0209' else 'PERMISSION_REQUIRED'
                     await self._gap('permission_blocked')
                     return
-                if status == 404:
+                if status == 404 and (self.mode == 'mock' or connection.detail_code == 'OAPI_MNGR_0301'):
                     self.state = 'WAITING'
                     await self._pause(attempts, waiting=True)
                     attempts += 1
@@ -256,13 +278,15 @@ class MockStreamService:
                         break
                 await connection.close()
                 if reason == 'LIVE_ENDED':
+                    if self.mode == 'real':
+                        await self._gap('live_ended')
                     self.state = 'WAITING'
                     await self._pause(attempts, waiting=True)
                     attempts += 1
                 elif reason == 'TOKEN_EXPIRED':
                     self.state = 'REFRESHING'
                     await self._gap('token_expired')
-                    if not await self.auth.ensure_access(force_refresh=True):
+                    if not await self._refresh(source):
                         self.state = 'AUTH_REQUIRED'
                         return
                 elif reason == 'RECONNECT':
@@ -290,3 +314,22 @@ class MockStreamService:
             finally:
                 if connection is not None:
                     await connection.close()
+
+
+class MockStreamService(_StreamController):
+    """Offline-only controller with strict mock source/auth/storage gates."""
+
+
+class RealStreamService(_StreamController):
+    auth_type = RealAuthService
+    source_type = RealSSESource
+    mode = "real"
+
+    def __init__(self, auth, repository, source_factory, **options):
+        if not isinstance(repository, RealDonationRepository):
+            raise ValueError("Real SSE requires a dedicated real repository")
+        super().__init__(auth, repository, source_factory, **options)
+
+    async def _refresh(self, source):
+        await self.auth.refresh_if_needed(force=True, expected_pair=source.lease)
+        return await self.auth.ensure_access()

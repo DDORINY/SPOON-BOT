@@ -2,9 +2,9 @@
 
 const byId = (id) => document.getElementById(id);
 const stateLabels = {
-  spoon_auth: { not_configured: "미연결", disconnected: "미연결", mock_ready: "Mock 준비", mock_authenticated: "Mock 인증됨", reauth_required: "재인증 필요", revoke_unconfirmed: "폐기 미확인", real_ready: "실제 인증 준비", authenticated: "SPOON 인증됨", configuration_error: "인증 설정 오류" },
-  broadcast: { not_configured: "미연결", disconnected: "미연결", mock_live: "Mock 연결" },
-  donation_events: { not_configured: "대기 중", disconnected: "미연결", stopped: "Mock 중지", connecting: "Mock 연결 중", live: "Mock 수집 중", waiting: "Mock 방송 대기", backoff: "Mock 재연결 대기", auth_required: "Mock 인증 필요", refreshing: "Mock 갱신 중", permission_required: "Mock 권한 필요", blocked: "Mock 차단", rate_limited: "Mock 제한 대기", storage_error: "Mock 저장 오류" },
+  spoon_auth: { not_configured: "미연결", disconnected: "미연결", mock_ready: "수집 준비", mock_authenticated: "수집 인증됨", reauth_required: "재인증 필요", revoke_unconfirmed: "폐기 미확인", real_ready: "실제 인증 준비", authenticated: "SPOON 인증됨", configuration_error: "인증 설정 오류" },
+  broadcast: { not_configured: "미연결", disconnected: "미연결", mock_live: "수집 연결", real_live: "실제 방송 연결" },
+  donation_events: { not_configured: "대기 중", disconnected: "미연결", stopped: "수집 중지", connecting: "수집 연결 중", live: "수집 수집 중", waiting: "수집 방송 대기", backoff: "수집 재연결 대기", auth_required: "수집 인증 필요", refreshing: "수집 갱신 중", permission_required: "수집 권한 필요", blocked: "수집 차단", rate_limited: "수집 제한 대기", storage_error: "수집 저장 오류" },
   capture_agent: { not_configured: "미설정", disconnected: "미연결" },
 };
 const stateElements = {
@@ -28,7 +28,7 @@ async function refreshStatus() {
       byId(element).textContent = stateLabels[key][status[key]] || "확인 필요";
     }
     online = true;
-    byId("status-message").textContent = "서버가 실행 중입니다. 후원 수집과 자동 캡처는 실제 방송에 연결되지 않습니다.";
+    byId("status-message").textContent = "서버가 실행 중입니다. 수집 상태를 확인하세요. 자동 캡처는 미설정입니다.";
     byId("last-update").textContent = `최근 확인 ${new Date().toLocaleTimeString("ko-KR")}`;
   } catch {
     for (const element of Object.values(stateElements)) {

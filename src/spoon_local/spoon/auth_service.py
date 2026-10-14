@@ -190,6 +190,16 @@ class AuthService(_AuthCore):
 
 
 class RealAuthService(_AuthCore):
+    async def invalidate_access(self):
+        async with self.lock:
+            self._on_auth_failure()
+
+    async def access_lease(self, scopes):
+        """Server-internal snapshot; identity guards concurrent token rotation."""
+        if not await self.authorized_for(scopes):
+            return None
+        return self.store.pair
+
     ready_state = "real_ready"
     authenticated_state = "authenticated"
     mode = "real"

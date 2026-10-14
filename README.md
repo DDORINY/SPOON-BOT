@@ -144,3 +144,13 @@ Real 모드는 로컬 .env의 SPOON_CLIENT_ID, SPOON_CLIENT_SECRET, SPOON_REGION
 로그아웃은 토큰 폐기를 시도한 후 로컬 토큰/세션을 정리한다. 폐기 실패는 미확인으로 표시한다. 단순 서버 종료는 원격 토큰을 폐기하지 않으므로 먼저 인증 관리에서 로그아웃하는 것이 좋다. PKCE/public client 조건과 이 PC의 Chrome↔WSL callback은 미확인이다.
 
 실제 자격 증명과 브라우저 로그인은 이번 작업에서 실행·검증하지 않았다. 자동 테스트는 가상 설정과 Mock HTTP Transport만 사용한다. 공식 근거·실행 전 체크리스트·수동 테스트는 [K2.2 문서](docs/k2-2-real-oauth.md)를 따른다.
+
+## 실제 SSE 수집 (K3.2)
+
+기본 실행과 OAuth-only 실행에서는 수집하지 않습니다. 사용자가 DJ 계정 인증 후 고지 확인과 시작 버튼을 눌러야 실제 SSE에 접속합니다. Mock DB와 별도인 절대 경로를 사용하세요.
+
+```bash
+.venv/bin/python -m spoon_local --real-oauth --real-sse-db /home/doha/projects/spoon-local/data/real/real-sse.sqlite3
+```
+
+실행·중지, 최소 수집, 누락 위험과 수동 점검은 [K3.2 문서](docs/k3-2-real-sse.md)를 참고하세요. 실제 방송 E2E는 자동 실행하지 않습니다.

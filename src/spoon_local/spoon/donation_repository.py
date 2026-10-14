@@ -1,4 +1,4 @@
-"""Dedicated, marked mock SQLite ledger; never migrate an unmarked database."""
+"""Dedicated, marked mode-isolated SQLite ledgers; never migrate an unmarked database."""
 
 from contextlib import contextmanager
 from decimal import Decimal
@@ -47,12 +47,18 @@ CREATE TABLE collection_gaps (
 
 class MockPathError(ValueError):
     def __init__(self):
-        super().__init__("Use an absolute, dedicated mock-sse.sqlite3 path")
+        super().__init__("Use an absolute, dedicated SSE database path")
 
 
 class DonationRepository:
+    filename = "mock-sse.sqlite3"
+    application_id = APPLICATION_ID
+    schema = SCHEMA
+    mode = "mock"
+    metadata_table = "mock_metadata"
+
     def __init__(self, path: Path):
-        if not path.is_absolute() or path.name != "mock-sse.sqlite3":
+        if not path.is_absolute() or path.name != self.filename:
             raise MockPathError()
         static_dir = Path(__file__).resolve().parents[1] / 'web' / 'static'
         if path.is_relative_to(static_dir):
@@ -74,14 +80,14 @@ class DonationRepository:
             # Verify marker before opening an existing file with SQLite.
             with self.path.open('rb') as handle:
                 header = handle.read(100)
-            if header[:16] != b'SQLite format 3\x00' or int.from_bytes(header[68:72], 'big') != APPLICATION_ID:
+            if header[:16] != b'SQLite format 3\x00' or int.from_bytes(header[68:72], 'big') != self.application_id:
                 raise MockPathError()
         connection = sqlite3.connect(self.path.as_uri() + '?mode=rw', uri=True, timeout=0.1)
         try:
             if fresh:
-                connection.executescript('BEGIN;\n' + SCHEMA)
-                connection.execute('INSERT INTO mock_metadata VALUES (?,?)', ('fingerprint_salt', os.urandom(32).hex()))
-                connection.execute(f'PRAGMA application_id={APPLICATION_ID}')
+                connection.executescript('BEGIN;\n' + self.schema)
+                connection.execute(f'INSERT INTO {self.metadata_table} VALUES (?,?)', ('fingerprint_salt', os.urandom(32).hex()))
+                connection.execute(f'PRAGMA application_id={self.application_id}')
                 connection.execute('PRAGMA user_version=1')
                 connection.commit()
             elif connection.execute('PRAGMA user_version').fetchone()[0] != 1:
@@ -93,7 +99,7 @@ class DonationRepository:
     def connection(self):
         connection = sqlite3.connect(self.path.as_uri() + '?mode=rw', uri=True, timeout=0.1)
         try:
-            if connection.execute('PRAGMA application_id').fetchone()[0] != APPLICATION_ID:
+            if connection.execute('PRAGMA application_id').fetchone()[0] != self.application_id:
                 raise MockPathError()
             connection.execute('PRAGMA foreign_keys=ON')
             with connection:
@@ -112,7 +118,7 @@ class DonationRepository:
 
     def append(self, donation: Donation, session: str) -> str:
         with self.connection() as db:
-            salt_row = db.execute("SELECT value FROM mock_metadata WHERE key='fingerprint_salt'").fetchone()
+            salt_row = db.execute(f"SELECT value FROM {self.metadata_table} WHERE key='fingerprint_salt'").fetchone()
             if salt_row is None:
                 raise MockPathError()
             salt = bytes.fromhex(salt_row[0])
@@ -152,4 +158,13 @@ class DonationRepository:
         with localcontext() as context:
             context.prec = 80
             total = sum((Decimal(row[0]) for row in amounts), Decimal(0))
-        return {'source_mode': 'mock', 'items': items, 'observed_total_spoons': format(total, 'f'), 'coverage': 'observed_only', 'issues': {'conflicts': conflicts, 'gaps': gaps, 'idless': idless}, 'next_before_sequence': rows[-1][0] if rows else None}
+        return {'source_mode': self.mode, 'items': items, 'observed_total_spoons': format(total, 'f'), 'coverage': 'observed_only', 'issues': {'conflicts': conflicts, 'gaps': gaps, 'idless': idless}, 'next_before_sequence': rows[-1][0] if rows else None}
+
+
+class RealDonationRepository(DonationRepository):
+    """Dedicated real ledger; a different marker prevents mock/operational DB reuse."""
+    filename = "real-sse.sqlite3"
+    application_id = 0x53525345
+    mode = "real"
+    metadata_table = "real_metadata"
+    schema = SCHEMA.replace("mock_metadata", "real_metadata").replace("'mock'", "'real'").replace("mock-single-dj", "real-single-dj")
