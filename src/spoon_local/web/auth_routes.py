@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from spoon_local.spoon.auth_service import AuthService
 from spoon_local.spoon.oauth import LOCAL_ORIGIN, OAuthFailure
+from spoon_local.spoon.stream_service import MockStreamService
 
 COOKIE = "spoon_mock_session"
 SAFE_HEADERS = {
@@ -60,7 +61,7 @@ async def post_values(request: Request, auth: AuthService | None):
     return values
 
 
-def auth_router(auth: AuthService | None) -> APIRouter:
+def auth_router(auth: AuthService | None, stream: MockStreamService | None = None) -> APIRouter:
     router = APIRouter(prefix="/auth/spoon", include_in_schema=False)
 
     @router.get("/prepare")
@@ -77,6 +78,8 @@ def auth_router(auth: AuthService | None) -> APIRouter:
             f'<input type="hidden" name="csrf" value="{escape(session.csrf, quote=True)}">'
             f'<button type="submit">{label}</button></form><a href="/">대시보드</a>'
         )
+        if stream:
+            body += '<p><a href="/auth/spoon/collection">Mock 후원 수집 관리</a></p>'
         if auth.state == "revoke_unconfirmed":
             body += '<p>폐기 미확인 상태입니다. 해제를 다시 시도하세요.</p>'
         response = page(body)
@@ -148,10 +151,43 @@ def auth_router(auth: AuthService | None) -> APIRouter:
         values = await post_values(request, auth)
         if values is None:
             return failure()
+        if stream:
+            await stream.stop("auth_disconnected")
         if not await auth.disconnect():
             return JSONResponse({"error": "revoke_unconfirmed"}, status_code=503, headers=SAFE_HEADERS)
         response = redirect("/")
         response.delete_cookie(COOKIE, path="/auth/spoon")
         return response
+
+    @router.get("/collection")
+    async def collection(request: Request):
+        if not auth or not stream:
+            return page('<p>Mock 후원 수집은 비활성입니다.</p><a href="/">대시보드</a>')
+        session = auth.prepare(request.cookies.get(COOKIE))
+        body = '<p>모의 후원만 별도 DB에 저장합니다. 실제 방송과 연결되지 않으며 누락 없는 원장이 아닙니다.</p>'
+        if await auth.authorized_for({'events.donation'}):
+            for action, label in [('start', 'Mock 수집 시작'), ('stop', 'Mock 수집 중지')]:
+                body += f'<form method="post" action="/auth/spoon/collection/{action}"><input type="hidden" name="csrf" value="{escape(session.csrf, quote=True)}"><button>{label}</button></form>'
+        else:
+            body += '<p>Mock 인증이 필요합니다.</p><a href="/auth/spoon/prepare">인증 준비</a>'
+        body += '<p><a href="/">대시보드</a></p>'
+        response = page(body)
+        response.set_cookie(COOKIE, session.identifier, max_age=300, httponly=True, samesite='lax', path='/auth/spoon')
+        return response
+
+    @router.post("/collection/start")
+    async def start_collection(request: Request):
+        if await post_values(request, auth) is None or not stream:
+            return failure()
+        if not await stream.start():
+            return JSONResponse({'error': 'mock_collection_not_ready'}, status_code=409, headers=SAFE_HEADERS)
+        return redirect('/')
+
+    @router.post("/collection/stop")
+    async def stop_collection(request: Request):
+        if await post_values(request, auth) is None or not stream:
+            return failure()
+        await stream.stop()
+        return redirect('/')
 
     return router

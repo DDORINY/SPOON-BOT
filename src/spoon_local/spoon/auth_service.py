@@ -109,10 +109,12 @@ class AuthService:
                 self.state = "reauth_required"
                 return False
 
-    async def refresh_if_needed(self) -> None:
+    async def refresh_if_needed(self, force: bool = False, expected_pair=None) -> None:
         async with self.lock:
             pair = self.store.pair
-            if not pair or self.clock() < pair.refresh_at or self.state != "mock_authenticated":
+            if (not pair or self.state != "mock_authenticated"
+                or (force and expected_pair is not None and pair is not expected_pair)
+                or (not force and self.clock() < pair.refresh_at)):
                 return
             try:
                 response = await self.client.refresh(pair.refresh_token, self.settings)
@@ -123,6 +125,14 @@ class AuthService:
             except Exception:
                 self.store.clear()
                 self.state = "reauth_required"
+
+    async def ensure_access(self, force_refresh: bool = False) -> bool:
+        expected = self.store.pair
+        await self.refresh_if_needed(force_refresh, expected)
+        return bool(self.state == "mock_authenticated" and self.store.pair)
+
+    async def authorized_for(self, scopes: set[str]) -> bool:
+        return bool(await self.ensure_access() and scopes.issubset(self.store.pair.scopes))
 
     async def status(self) -> str:
         await self.refresh_if_needed()

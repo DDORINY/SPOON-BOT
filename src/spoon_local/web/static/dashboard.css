@@ -44,3 +44,7 @@ footer { padding: 28px 0; margin-top: 28px; color: #a4aec1; font-size: 12px; bor
 @media (prefers-reduced-motion: no-preference) { .dot { transition: background .2s; } }
 
 .auth-link { display: inline-block; margin-top: 16px; color: #c9adff; font-size: 14px; }
+
+.donation-row { padding: 14px 0; border-bottom: 1px solid #2a3244; display: grid; gap: 5px; font-size: 14px; }
+.donation-row small { color: #a4aec1; }
+#donation-warning { margin-top: 16px; }

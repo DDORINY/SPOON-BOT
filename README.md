@@ -84,10 +84,10 @@ API에는 설정 값, DB 경로, 인증정보를 포함하지 않는다. `.env`�
 로컬 모의 인증을 실행하려면 다음 명령을 사용한다. 앱은 127.0.0.1:8000에만 바인딩한다.
 
 ```bash
-.venv/bin/python -m spoon_local --mock-auth
+.venv/bin/python -m spoon_local --mock-auth --mock-db /tmp/spoon-local-demo/mock-sse.sqlite3
 ```
 
-`http://localhost:8000/auth/spoon/prepare`에서 Mock 시작 → 로컬 모의 동의 → localhost 콜백으로 진행한다. 대시보드의 준비 안내 링크도 같은 화면을 연다. 실제 로그인이나 방송 연결은 없다. 기본 DB 설정과 초기화는 기존과 같으며, 토큰은 DB와 .env에 기록하지 않는다.
+`http://localhost:8000/auth/spoon/prepare`에서 Mock 시작 → 로컬 모의 동의 → localhost 콜백으로 진행한다. 대시보드의 준비 안내 링크도 같은 화면을 연다. 실제 로그인이나 방송 연결은 없다. Mock 실행은 명시한 전용 DB만 초기화하고 실제 .env·운영 DB를 사용하지 않는다. 토큰은 DB와 .env에 기록하지 않는다.
 
 세션은 5분, mock code는 60초·1회용이다. 시작·해제·모의 동의는 Host/Origin/CSRF 검증된 POST만 허용한다. 토큰은 단일 메모리 슬롯에 저장하고 종료 시 제거하므로 재시작하면 다시 mock 인증해야 한다. status 조회 시 만료 여유 구간에 들어온 토큰을 하나의 lock 안에서 갱신하며, 동시 요청도 한 번만 갱신한다. 백그라운드 갱신 워커는 없다. 실패하면 reauth_required, revoke 실패하면 revoke_unconfirmed로 표시하고 자동 갱신을 중지한다. 해제를 다시 시도할 수 있으며 후원 DB는 유지한다.
 
@@ -103,3 +103,28 @@ callback query는 ASGI scope에서 제거하고 Uvicorn access filter도 query�
 ```
 
 실제 연결 전에는 앱 승인, localhost Redirect URI 등록과 Windows↔WSL 도달, PKCE/public client 사양, 안전한 토큰 영속화 정책을 확인해야 한다. 조사 근거는 `docs/k2-0-spoon-oauth-research.md`, 설계는 `docs/k2-0-spoon-oauth-design.md`에 있다.
+
+## K3.1 오프라인 Mock SSE 후원 시연
+
+Mock 경로는 실제 `.env`를 읽지 않으며 운영 SQLite 초기화도 하지 않는다. 실행에는 **절대 경로의 별도 DB**가 필수다. 이름은 `mock-sse.sqlite3`이어야 한다. 기존 DB는 이 앱의 Mock 마커와 버전이 있어야 열 수 있으며, 이름이 맞아도 일반/운영 DB이면 거절한다. DB·부모 경로의 symlink, 파일 hardlink, 정적 파일 디렉터리도 허용하지 않는다. 기본 실행은 SSE 비활성이다.
+
+```bash
+.venv/bin/python -m spoon_local --mock-auth --mock-db /tmp/spoon-local-demo/mock-sse.sqlite3
+```
+
+1. `http://localhost:8000/auth/spoon/prepare`에서 Mock 인증을 시작하고 로컬 모의 동의한다.
+2. `http://localhost:8000/auth/spoon/collection`에서 **Mock 수집 시작**을 누른다. 인증 전에는 수집할 수 없다.
+3. `http://localhost:8000/`에서 최근 Mock 후원과 관측 합계를 확인한다.
+4. 같은 수집 관리 화면에서 **Mock 수집 중지**를 누른다. 인증 해제와 앱 종료도 수집을 중지하며 기록은 보존한다.
+
+fixture는 실제 후원이 아니다. 4건/12.25 스푼을 저장하고 같은 ID 중복 1건을 제외하며, 다른 금액의 같은 ID 충돌 1건과 ID 없는 2건을 보여준다. 충돌 입력은 합계에 넣지 않는다. fixture 종료 후 상태는 Mock 방송 대기이다. 재시작 시 기존 Mock 기록을 보존하지만 인증은 다시 필요하다. `/tmp` 자체는 OS에 의해 정리될 수 있으므로 영구 저장으로 보장하지 않는다.
+
+API: `GET /api/donations?limit=20&before_sequence=...`. 최대100개이며 `source_mode=mock`, `coverage=observed_only`, 금액 문자열, 수신 순번과 발생/수신 UTC 시각을 반환한다. 원본 사용자 ID·닉네임·메시지·event ID·fingerprint·토큰은 반환하지 않는다. 기본 앱은 `source_mode=disabled`와 빈 목록을 반환한다.
+
+DB 테이블은 mock_metadata, broadcast_sessions, donations, event_conflicts, collection_gaps이다. 토큰은 없다. 명시 ID가 같고 금액·발생시각도 같으면 중복, 핵심값이 다르면 충돌을 기록한다. 개인정보 필드만 다른 경우를 구분하기 위해 원문을 저장하지 않으므로 충돌 탐지에도 한계가 있다. ID 없는 이벤트는 각각 저장한다. 모의 session 메타데이터만 사용하며 실제 liveId 검증이나 회차 귀속을 구현하지 않았다.
+
+수집은 단일 controller/task, 제한 큐, 단일 writer를 사용한다. queue overflow·손상된 프레임·중단·재연결·저장 실패는 gap 또는 저장 실패 표시를 남긴다. DB 장애로 gap조차 기록하지 못하면 메모리에 최소 원인을 보관해 같은 프로세스에서 복구 후 저장한다. 그 상태에서 프로세스가 죽으면 gap 기록도 소실될 수 있다. Last-Event-ID replay 및 누락 후원 복원은 제공하지 않는다. 합계는 완전한 후원 원장이 아니다.
+
+금액은 Decimal로 검증하고 canonical 문자열로 저장한다. number의 정수/범위는 공식 보장으로 가정하지 않으며 로컬 자릿수/크기 제한을 적용한다. 저장은 금액·시각·중복 메타데이터만 사용하고 채팅/입장/하트도 저장하지 않는다. HMAC fingerprint의 salt는 Mock DB에 함께 보관하며 암호화·기밀성 보장이 아니라 안정적인 비교용이다. 30일 자동 삭제와 캡처는 아직 구현하지 않았다.
+
+구현·검증 요약은 `docs/k3-1-mock-sse.md`에 있다. 앱 승인 완료는 사용자 확인 정보이며, 이 실행이 실제 OAuth/SSE 연결을 활성화하지 않는다.
