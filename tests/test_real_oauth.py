@@ -59,14 +59,18 @@ async def browser(handler):
 
 async def begin_browser(client):
     page=await client.get('/auth/spoon/prepare')
-    assert '실제 SPOON 로그인' in page.text
+    assert 'SPOON으로 로그인' in page.text
     assert "form-action 'self' https://developers.spooncast.net" in page.headers['content-security-policy']
     cookie=page.headers['set-cookie']
     assert REAL_COOKIE in cookie and 'HttpOnly' in cookie and 'SameSite=lax' in cookie
     csrf=re.search(r'name="csrf" value="([^"]+)"',page.text).group(1)
     response=await client.post('/auth/spoon/start',data={'csrf':csrf},headers={'Origin':LOCAL_ORIGIN})
     assert response.status_code==303
-    url=urlsplit(response.headers['location'])
+    assert response.headers['location']==LOCAL_ORIGIN+'/auth/spoon/continue'
+    handoff=await client.get(response.headers['location'])
+    from html import unescape
+    destination=unescape(re.search(r'id="official-oauth-link" href="([^"]+)"',handoff.text)[1])
+    url=urlsplit(destination)
     assert (url.scheme,url.netloc,url.path)==('https','developers.spooncast.net','/kr/oauth/authorize')
     return csrf,parse_qs(url.query)['state'][0]
 
@@ -173,10 +177,10 @@ def test_manual_browser_flow_and_logout_without_sse():
             csrf,state=await begin_browser(client)
             assert requests==[]  # URL generation did not fetch authorization endpoint.
             callback=await client.get('/auth/spoon/callback',params={'code':'test-code','state':state})
-            assert callback.status_code==303 and callback.headers['location']==LOCAL_ORIGIN+'/auth/spoon/result'
+            assert callback.status_code==303 and callback.headers['location']==LOCAL_ORIGIN+'/'
             assert '?' not in callback.headers['location']
             assert (await client.get('/api/status')).json()['spoon_auth']=='authenticated'
-            assert '인증 성공' in (await client.get('/auth/spoon/result')).text
+            assert 'SPOON 계정 연결 완료' in (await client.get('/auth/spoon/result')).text
             assert (await client.get('/api/donations')).json()['source_mode']=='disabled'
             assert (await client.get('/auth/spoon/mock-consent')).status_code==404
             assert (await client.post('/auth/spoon/collection/start',data={'csrf':csrf},headers={'Origin':LOCAL_ORIGIN})).status_code==404
@@ -351,7 +355,7 @@ def test_real_mode_never_accesses_db_or_default_config(monkeypatch):
     async def check():
         async with browser(lambda request:httpx.Response(500)) as (client,app):
             assert app.state.database_path is None
-            assert (await client.get('/')).status_code==200
+            assert (await client.get('/')).status_code==303
     asyncio.run(check())
 
 
@@ -492,4 +496,27 @@ def test_cancelled_refresh_drops_old_pair_to_avoid_reusing_rotated_token():
         with pytest.raises(asyncio.CancelledError):await task
         assert service.store.pair is None and service.session is None and service.state=='reauth_required'
         await http.aclose()
+    asyncio.run(check())
+
+
+def test_handoff_consumed_callback_cannot_exchange_again_or_return_link():
+    calls=[]
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200,json=pair())
+    async def check():
+        async with browser(handler) as (client,app):
+            csrf,state=await begin_browser(client)
+            assert calls==[]
+            first=await client.get('/auth/spoon/callback',params={'state':state,'code':'invented-first-code'})
+            assert first.status_code==303 and len(calls)==1
+            assert (await client.get('/auth/spoon/continue')).status_code==400
+            # Back/refresh of a provider page can deliver either the same or a
+            # different code for the old state. Neither is exchanged again.
+            for code in ['invented-first-code','invented-second-code']:
+                await client.get('/auth/spoon/callback',params={'state':state,'code':code})
+            assert len(calls)==1
+            assert (await client.get('/api/status')).json()['spoon_auth']=='authenticated'
+            retry=await client.post('/auth/spoon/start',data={'csrf':csrf},headers={'Origin':LOCAL_ORIGIN})
+            assert retry.status_code==400
     asyncio.run(check())

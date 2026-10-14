@@ -293,7 +293,10 @@ def test_dashboard_query_no_autoconnect_and_confirmed_post_logout(tmp_path):
                 prepare = await browser.get('/auth/spoon/prepare')
                 csrf = re.search(r'name="csrf" value="([^"]+)"', prepare.text)[1]
                 login = await browser.post('/auth/spoon/start', data={'csrf': csrf}, headers={'Origin': LOCAL_ORIGIN})
-                state = parse_qs(urlsplit(login.headers['location']).query)['state'][0]
+                handoff = await browser.get(login.headers['location'])
+                from html import unescape
+                destination = unescape(re.search(r'id="official-oauth-link" href="([^"]+)"', handoff.text)[1])
+                state = parse_qs(urlsplit(destination).query)['state'][0]
                 assert (await browser.get('/auth/spoon/callback', params={'state': state, 'code': 'invented-code'})).status_code == 303
                 for url in ['/', '/api/status', '/api/donations', '/api/collection-mode', '/auth/spoon/collection']:
                     assert (await browser.get(url)).status_code == 200
@@ -307,6 +310,7 @@ def test_dashboard_query_no_autoconnect_and_confirmed_post_logout(tmp_path):
                 assert not calls and not path.exists()
                 assert (await browser.post(action, data={'csrf': csrf, 'dj_notice': 'confirmed'}, headers={'Origin': LOCAL_ORIGIN})).status_code == 303
                 await until(lambda: path.exists())
+                assert (await browser.post('/auth/spoon/history/allow',data={'csrf':csrf,'local_owner':'confirmed'},headers={'Origin':LOCAL_ORIGIN})).status_code==200
                 for _ in range(100):
                     data = (await browser.get('/api/donations')).json()
                     if data['items']:

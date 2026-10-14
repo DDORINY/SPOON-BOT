@@ -14,7 +14,7 @@ from dotenv import dotenv_values
 from spoon_local.config import PROJECT_ROOT
 from spoon_local.logging_config import configure_safe_http_logs
 from spoon_local.spoon.oauth import (
-    CALLBACK_URI, MOCK_CLIENT_ID, MOCK_CLIENT_SECRET, OAuthFailure, OAuthSettings,
+    REAL_EVENT_SCOPES, CALLBACK_URI, MOCK_CLIENT_ID, MOCK_CLIENT_SECRET, OAuthFailure, OAuthSettings,
 )
 from spoon_local.spoon.token_store import TokenPair
 
@@ -47,7 +47,7 @@ def load_real_oauth_settings(project_root: Path = PROJECT_ROOT, environ: Mapping
         selected = {name: environment.get(name, values.get(name)) for name in names}
         if any(not isinstance(value,str) or not value.strip() for value in selected.values()):
             raise RealConfigurationError()
-        settings = OAuthSettings(selected[names[0]],selected[names[1]],selected[names[2]],selected[names[3]])
+        settings = OAuthSettings(selected[names[0]],selected[names[1]],selected[names[2]],selected[names[3]],scopes=REAL_EVENT_SCOPES)
         validate_real_settings(settings)
         return settings
     except (ValueError, TypeError, OSError):

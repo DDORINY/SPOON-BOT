@@ -56,6 +56,7 @@ class DonationRepository:
     schema = SCHEMA
     mode = "mock"
     metadata_table = "mock_metadata"
+    supported_versions = {1}
 
     def __init__(self, path: Path):
         if not path.is_absolute() or path.name != self.filename:
@@ -90,7 +91,7 @@ class DonationRepository:
                 connection.execute(f'PRAGMA application_id={self.application_id}')
                 connection.execute('PRAGMA user_version=1')
                 connection.commit()
-            elif connection.execute('PRAGMA user_version').fetchone()[0] != 1:
+            elif connection.execute('PRAGMA user_version').fetchone()[0] not in self.supported_versions:
                 raise MockPathError()
         finally:
             connection.close()
@@ -116,29 +117,55 @@ class DonationRepository:
             db.execute('INSERT INTO broadcast_sessions(session_key,provider_live_id,first_seen_at_utc) VALUES (?,?,?)', (key, live_id, utc_now()))
             return key
 
-    def append(self, donation: Donation, session: str) -> str:
+    def append(self, donation: Donation, session: str, account_key=None, round_id=None) -> str:
         with self.connection() as db:
+            if account_key is not None:
+                from spoon_local.spoon.broadcast_rounds import account
+                account(account_key)
+                if db.execute('PRAGMA user_version').fetchone()[0] != 2:
+                    raise ValueError('Explicit round migration required')
+                if round_id is not None and not db.execute("SELECT 1 FROM broadcast_rounds WHERE round_id=? AND account_key=? AND provider_live_id IS NOT NULL AND state='observed_live'", (round_id, account_key)).fetchone():
+                    raise ValueError('Confirmed same-account round required')
+            elif round_id is not None:
+                raise ValueError('Account namespace required')
             salt_row = db.execute(f"SELECT value FROM {self.metadata_table} WHERE key='fingerprint_salt'").fetchone()
             if salt_row is None:
                 raise MockPathError()
             salt = bytes.fromhex(salt_row[0])
             if len(salt) != 32:
                 raise MockPathError()
-            core = json.dumps([donation.event_id, donation.amount_spoons, donation.occurred_at_utc], separators=(',', ':')).encode()
+            core_values = [donation.event_id, donation.amount_spoons, donation.occurred_at_utc]
+            if account_key is not None:
+                core_values.append(account_key)
+            core = json.dumps(core_values, separators=(',', ':')).encode()
             fingerprint = hmac.new(salt, core, hashlib.sha256).hexdigest()
             existing = db.execute('SELECT record_id,fingerprint FROM donations WHERE stream_event_id=?', (donation.event_id,)).fetchone() if donation.event_id is not None else None
             if existing:
                 if hmac.compare_digest(existing[1], fingerprint):
                     return 'duplicate'
                 db.execute('INSERT INTO event_conflicts(existing_record_id,incoming_fingerprint,detected_at_utc) VALUES (?,?,?)', (existing[0], fingerprint, utc_now()))
+                if account_key is not None:
+                    db.execute('UPDATE event_conflicts SET account_key=? WHERE conflict_sequence=(SELECT MAX(conflict_sequence) FROM event_conflicts)',(account_key,))
                 return 'conflict'
             db.execute('INSERT INTO donations(record_id,session_key,stream_event_id,amount_spoons_text,occurred_at_utc,received_at_utc,dedup_quality,fingerprint) VALUES (?,?,?,?,?,?,?,?)', (str(uuid.uuid4()), session, donation.event_id, donation.amount_spoons, donation.occurred_at_utc, donation.received_at_utc, 'event_id' if donation.event_id is not None else 'unavailable', fingerprint))
+            if account_key is not None:
+                db.execute('UPDATE donations SET account_key=?,broadcast_round_id=?,attribution_basis=? WHERE record_id=(SELECT record_id FROM donations ORDER BY received_sequence DESC LIMIT 1)',(account_key,round_id,'observed_context' if round_id else 'unconfirmed'))
             return 'inserted'
 
-    def gap(self, reason: str, detected_at: str | None = None) -> str:
+    def observe_round(self, account_key, live_id, started_at, observed_at=None):
+        from spoon_local.spoon.broadcast_rounds import RoundRepository
+        return RoundRepository(self).observe(account_key, live_id, started_at, observed_at)
+
+    def uncertain_rounds(self, account_key):
+        from spoon_local.spoon.broadcast_rounds import RoundRepository
+        return RoundRepository(self).uncertain(account_key)
+
+    def gap(self, reason: str, detected_at: str | None = None, account_key=None) -> str:
         key = str(uuid.uuid4())
         with self.connection() as db:
             db.execute('INSERT INTO collection_gaps(gap_id,reason_code,detected_at_utc) VALUES (?,?,?)', (key, reason, detected_at or utc_now()))
+            if account_key is not None:
+                db.execute('UPDATE collection_gaps SET account_key=? WHERE gap_id=?',(account_key,key))
         return key
 
     def recover_gaps(self):
@@ -167,4 +194,5 @@ class RealDonationRepository(DonationRepository):
     application_id = 0x53525345
     mode = "real"
     metadata_table = "real_metadata"
+    supported_versions = {1, 2}
     schema = SCHEMA.replace("mock_metadata", "real_metadata").replace("'mock'", "'real'").replace("mock-single-dj", "real-single-dj")

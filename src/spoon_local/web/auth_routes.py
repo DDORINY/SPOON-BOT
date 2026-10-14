@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlencode
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from spoon_local.web.auth_diagnostics import diagnose
 from spoon_local.spoon.auth_service import AuthService
 from spoon_local.spoon.oauth import LOCAL_ORIGIN, OAuthFailure
 from spoon_local.spoon.stream_service import MockStreamService
@@ -22,7 +23,7 @@ def page(body: str, status: int = 200):
     return HTMLResponse(
         '<!doctype html><html lang="ko"><meta charset="utf-8"><title>로컬 Mock 인증</title>'
         '<body><h1>로컬 Mock 인증</h1>' + body + '</body></html>',
-        status_code=status, headers=SAFE_HEADERS,
+        status_code=status, headers={**SAFE_HEADERS, "Referrer-Policy": "same-origin"},
     )
 
 
@@ -40,24 +41,46 @@ def single(values: dict, name: str):
 
 
 async def post_values(request: Request, auth: AuthService | None, cookie_name: str = COOKIE):
-    if (
-        not auth or request.headers.getlist("origin") != [LOCAL_ORIGIN]
-        or request.headers.get("content-type", "").split(";")[0] != "application/x-www-form-urlencoded"
-    ):
+    def deny(code):
+        diagnose(request.scope, code)
         return None
+
+    if not auth:
+        return deny('auth_disabled')
+    origins = request.headers.getlist('origin')
+    if not origins:
+        return deny('origin_missing')
+    if len(origins) != 1:
+        return deny('origin_duplicate')
+    if origins == ['null']:
+        return deny('origin_null')
+    if origins != [LOCAL_ORIGIN]:
+        return deny('origin_mismatch')
+    if request.headers.get('content-type', '').split(';')[0] != 'application/x-www-form-urlencoded':
+        return deny('content_type_invalid')
     # Bound the body while streaming, without requiring python-multipart.
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
         if len(body) > 4096:
-            return None
+            return deny("body_too_large")
     try:
         values = parse_qs(body.decode("utf-8"), keep_blank_values=True, max_num_fields=8)
     except (ValueError, UnicodeError):
-        return None
+        return deny("form_invalid")
     sid = request.cookies.get(cookie_name)
+    if not sid:
+        return deny('session_cookie_missing')
+    if auth.session is None:
+        return deny('session_unavailable')
+    if auth.clock() >= auth.session.deadline:
+        return deny('session_expired')
+    if not auth.valid_session(sid):
+        return deny('session_mismatch')
+    if not single(values, 'csrf'):
+        return deny('csrf_missing_or_duplicate')
     if not auth.valid_csrf(sid, single(values, "csrf")):
-        return None
+        return deny('csrf_mismatch')
     return values
 
 

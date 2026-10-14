@@ -66,10 +66,12 @@ class _AuthCore:
     def valid_csrf(self, identifier: str | None, csrf: str | None) -> bool:
         return bool(self.valid_session(identifier) and csrf and same(csrf, self.session.csrf))
 
-    async def begin(self, identifier: str) -> str:
+    async def begin(self, identifier: str, *, reuse_pending: bool = False) -> str:
         async with self.lock:
             if not self.valid_session(identifier) or self.store.pair is not None:
                 raise OAuthFailure()
+            if reuse_pending and self.pending and self.valid_pending(identifier, self.pending.state):
+                return self.pending.state
             state = secrets.token_urlsafe(32)
             self.pending = Pending(state, identifier, self.clock() + SESSION_TTL)
             return state
@@ -190,6 +192,22 @@ class AuthService(_AuthCore):
 
 
 class RealAuthService(_AuthCore):
+    account_context = None
+
+    async def complete(self, identifier, state, code, error):
+        success = await super().complete(identifier, state, code, error)
+        # No documented stable DJ identity is supplied by the token response.
+        # A login, token value, client ID or arbitrary user_id is not an identity.
+        self.account_context = None
+        return success
+
+    def close(self):
+        super().close()
+        self.account_context = None
+
+    async def begin(self, identifier: str) -> str:
+        return await super().begin(identifier, reuse_pending=True)
+
     async def invalidate_access(self):
         async with self.lock:
             self._on_auth_failure()

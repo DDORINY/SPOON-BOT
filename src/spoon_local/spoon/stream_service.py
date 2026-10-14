@@ -46,11 +46,20 @@ class _StreamController:
         self.session_key = None
         self.gap_persistence_failed = False
         self.unpersisted_gaps = {}
+        from spoon_local.spoon.realtime_events import RealtimeBuffer
+        self.realtime = RealtimeBuffer()
+        self.collection_browser_session = None
+        self.collection_account = None
+        self.last_donation_at = None
         self.counts = {'inserted': 0, 'duplicate': 0, 'conflict': 0, 'invalid': 0}
 
     async def _write(self, operation, *args):
         if self.writer_task is None or self.writer_task.done():
             # Startup/cleanup has no active writer. Never race another DB writer.
+            if operation == 'gap' and self.mode == 'real':
+                from spoon_local.spoon.broadcast_rounds import version
+                if version(self.repository) == 2:
+                    return self.repository.gap(*args,account_key=self.collection_account)
             return getattr(self.repository, operation)(*args)
         future = asyncio.get_running_loop().create_future()
         future.add_done_callback(lambda item: item.exception() if not item.cancelled() else None)
@@ -75,6 +84,8 @@ class _StreamController:
             if not await self.auth.authorized_for({'events.donation'}):
                 self.state = 'PERMISSION_REQUIRED'
                 return False
+            if self.mode == 'real':
+                self.collection_account = getattr(self.auth, 'account_context', None)
             try:
                 source = self.source_factory()
             except Exception:
@@ -88,11 +99,14 @@ class _StreamController:
             if self.mode == "real":
                 try:
                     self.repository.initialize()
-                    self.repository.gap("collection_started")
+                    from spoon_local.spoon.broadcast_rounds import version
+                    self.repository.gap("collection_started", account_key=self.collection_account if version(self.repository)==2 else None)
                 except (sqlite3.Error, ValueError, OSError):
                     await source.aclose()
                     self.state = "STORAGE_ERROR"
                     return False
+            self.realtime.reset()
+            self.collection_browser_session = self.auth.session if self.mode == 'real' else None
             self.queue = asyncio.Queue(maxsize=self.queue_size)
             self.state = 'CONNECTING'
             self.task = asyncio.create_task(self._run(source))
@@ -105,6 +119,8 @@ class _StreamController:
                 with suppress(asyncio.CancelledError):
                     await self.task
                 await self._gap(reason)
+            self.realtime.reset()
+            self.collection_browser_session = None
             self.state = 'AUTH_REQUIRED' if reason == 'auth_disconnected' else 'STOPPED'
 
     async def close(self):
@@ -114,9 +130,19 @@ class _StreamController:
         while True:
             operation, args, future = await self.queue.get()
             try:
-                result = getattr(self.repository, operation)(*args)
+                if operation == 'append' and self.mode == 'real':
+                    from spoon_local.spoon.broadcast_rounds import version
+                    namespace = self.collection_account if version(self.repository) == 2 else None
+                    result = self.repository.append(*args, account_key=namespace) if namespace is not None else self.repository.append(*args)
+                elif operation == 'gap' and self.mode == 'real':
+                    from spoon_local.spoon.broadcast_rounds import version
+                    namespace = self.collection_account if version(self.repository) == 2 else None
+                    result = self.repository.gap(*args,account_key=namespace)
+                else:
+                    result = getattr(self.repository, operation)(*args)
                 if operation == 'append':
                     self.counts[result] += 1
+                    self.last_donation_at = utc_now()
                 if future is not None and not future.done():
                     future.set_result(result)
             except Exception as error:
@@ -174,6 +200,15 @@ class _StreamController:
         return await self.auth.ensure_access(force_refresh=True)
 
     async def _authorized(self) -> bool:
+        if self.mode == 'real' and self.auth.session is not self.collection_browser_session:
+            self.realtime.reset()
+            self.state = 'AUTH_REQUIRED'
+            await self._gap('browser_session_changed')
+            return False
+        if self.mode == 'real' and getattr(self.auth, 'account_context', None) != self.collection_account:
+            self.state = 'AUTH_REQUIRED'
+            await self._gap('account_context_changed')
+            return False
         if not await self.auth.ensure_access():
             self.state = 'AUTH_REQUIRED'
             await self._gap('auth_unavailable')
@@ -268,6 +303,9 @@ class _StreamController:
                                 self.state = 'STOPPED'
                                 await self._gap('queue_overflow')
                                 return
+                        elif frame.event in {'chat','like'}:
+                            # The existing single provider stream delivers only granted types.
+                            self.realtime.accept(frame,self.auth.store.pair.scopes if self.auth.store.pair else frozenset())
                         elif frame.event == 'end':
                             try:
                                 reason = json.loads(frame.data)['reason']

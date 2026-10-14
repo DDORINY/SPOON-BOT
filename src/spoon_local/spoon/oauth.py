@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 
 REQUIRED_SCOPES = frozenset({"live.read", "events.donation"})
+REAL_EVENT_SCOPES = REQUIRED_SCOPES | frozenset({"events.chat", "events.like", "listeners.read", "fans.read", "chat.send"})
 MOCK_CLIENT_ID = "00000000-0000-4000-8000-000000000001"
 MOCK_CLIENT_SECRET = "mock-only-not-a-real-secret"
 LOCAL_ORIGIN = "http://localhost:8000"
@@ -37,7 +38,8 @@ class OAuthSettings:
         if (
             not isinstance(self.client_secret, str) or not self.client_secret.strip()
             or not isinstance(self.region, str) or self.region not in {"kr", "jp"}
-            or self.redirect_uri != CALLBACK_URI or self.scopes != REQUIRED_SCOPES
+            or self.redirect_uri != CALLBACK_URI or not isinstance(self.scopes,frozenset)
+            or not REQUIRED_SCOPES.issubset(self.scopes) or not self.scopes.issubset(REAL_EVENT_SCOPES)
         ):
             raise ValueError("Invalid OAuth configuration")
 

@@ -32,7 +32,7 @@ def test_status_dashboard_and_static_files(tmp_path, monkeypatch):
                 html = await client.get("/")
                 assert html.status_code == 200
                 assert "text/html" in html.headers["content-type"]
-                for label in ["SPOON-BOT", "최근 후원", "최근 캡처", "데이터 없음", "준비 중"]:
+                for label in ["DOHA-BOT", "최근 후원", "내 방송 관리", "오늘 받은 후원", "후원한 청취자 수"]:
                     assert label in html.text
                 for asset, content_type in [("dashboard.css", "text/css"), ("dashboard.js", "javascript")]:
                     response = await client.get(f"/static/{asset}")
